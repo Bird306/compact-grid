@@ -1,3 +1,4 @@
+--!native
 --!strict
 --!optimize 2
 
@@ -10,8 +11,8 @@ export type Grid = {
 }
 
 export type MultiQueryResult = {
-	entries: buffer,
-	counts: buffer,
+	entries: { number },
+	counts: { number },
 }
 
 local U32 = 4
@@ -29,7 +30,8 @@ local function cellToHash(cx: number, cy: number, cz: number, hashtableSize: num
 end
 
 local function posToHash(x: number, y: number, z: number, invCellSize: number, hashtableSize: number): number
-	return cellToHash(posToCell(x, y, z, invCellSize), hashtableSize)
+	local cx, cy, cz = posToCell(x, y, z, invCellSize)
+	return cellToHash(cx, cy, cz, hashtableSize)
 end
 
 local CompactGrid = {}
@@ -65,10 +67,6 @@ CompactGrid.update = function(grid: Grid, positions: { Vector3 })
 		buffer.writeu32(cellStarts, h, buffer.readu32(cellStarts, h) + 1)
 	end
 
-	for i = U32, hashtableSize * U32, U32 do
-		buffer.writeu32(cellStarts, i, buffer.readu32(cellStarts, i) + buffer.readu32(cellStarts, i - U32))
-	end
-
 	local start = 0
 	for i = 0, (hashtableSize - 1) * U32, U32 do
 		start += buffer.readu32(cellStarts, i)
@@ -76,11 +74,12 @@ CompactGrid.update = function(grid: Grid, positions: { Vector3 })
 	end
 	buffer.writeu32(cellStarts, hashtableSize * U32, start)
 
-	for i = n, 1, -1 do
+	for i = 1, n do
 		local pos = positions[i]
 		local h = posToHash(pos.X, pos.Y, pos.Z, invCellSize, hashtableSize) * U32
-		buffer.writeu32(cellStarts, h, buffer.readu32(cellStarts, h) - 1)
-		buffer.writeu32(cellEntries, buffer.readu32(cellStarts, h), i)
+		local writePos = buffer.readu32(cellStarts, h) - 1
+		buffer.writeu32(cellEntries, writePos * U32, i)
+		buffer.writeu32(cellStarts, h, writePos)
 	end
 end
 
@@ -115,7 +114,7 @@ CompactGrid.queryRegion = function(grid: Grid, origin: Vector3, halfExtent: Vect
 	return resultCount
 end
 
-CompactGrid.queryMultiRegions = function(
+CompactGrid.multiQueryRegions = function(
 	grid: Grid,
 	queryOrigins: { Vector3 },
 	queryHalfExtents: { Vector3 },
@@ -130,11 +129,10 @@ CompactGrid.queryMultiRegions = function(
 	local queryResultCounts = queryResults.counts
 
 	local n = #queryOrigins
-	local nu32 = n * U32
 
-	if nu32 > buffer.len(queryResultCounts) then
-		queryResultCounts = buffer.create(nu32)
-		queryResults.counts = queryResultCounts
+	for i = 1, n do
+		queryResultEntries[i] = 0
+		queryResultCounts[i] = 0
 	end
 
 	local totalResultCount = 0
@@ -156,18 +154,14 @@ CompactGrid.queryMultiRegions = function(
 					local cbegin = buffer.readu32(cellStarts, h)
 					local cend = buffer.readu32(cellStarts, h + U32)
 					for k = cbegin, cend - 1 do
-						buffer.writeu32(
-							queryResultEntries,
-							(totalResultCount + resultCount) * U32,
-							buffer.readu32(cellEntries, k * U32)
-						)
+						queryResultEntries[totalResultCount + resultCount] = buffer.readu32(cellEntries, k * U32)
 						resultCount += 1
 					end
 				end
 			end
 		end
 
-		buffer.writeu32(queryResultCounts, (i - 1) * U32, resultCount)
+		queryResultCounts[i] = totalResultCount
 		totalResultCount += resultCount
 	end
 end
