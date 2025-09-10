@@ -49,16 +49,18 @@ end
 CompactGrid.update = function(grid: Grid, positions: { Vector3 })
 	local invCellSize = grid.invCellSize
 	local hashtableSize = grid.hashtableSize
-	local prevN = grid.n
 	local cellStarts = grid.cellStarts
 	local cellEntries = grid.cellEntries
 
-	local n = #positions
-	if n > prevN then
-		cellEntries = buffer.create(U32 * n)
-		grid.cellEntries = cellEntries
+	do
+		local newN = #positions
+		local newNByte = newN * U32
+		if newNByte > buffer.len(cellEntries) then
+			cellEntries = buffer.create(newNByte)
+			grid.cellEntries = cellEntries
+		end
+		grid.n = newN
 	end
-	grid.n = n
 
 	buffer.fill(cellStarts, 0, 0)
 
